@@ -51,8 +51,10 @@ const LIFT_END = 0.5;
 const REVEAL_AT = [0.42, 0.47, 0.52] as const;
 const REVEAL_SPAN = 0.16;
 
-// Plates are wider than the screen in portrait (cropped around the focal point).
-const PLATE_SIZES = "(orientation: portrait) 330vw, 100vw";
+// The 1920px plates are cropped around the focal point. Keep mobile requests close
+// to the source resolution instead of multiplying the 330vw layout width by DPR.
+const PLATE_SIZES =
+  "(max-width: 1023px) and (orientation: portrait) 150vw, (max-width: 1023px) 75vw, (orientation: portrait) 100vw, 100vw";
 
 const clamp01 = (value: number) => Math.min(Math.max(value, 0), 1);
 
@@ -157,6 +159,7 @@ export function Hero() {
    * frame shows through.
    */
   const [curtainGone, setCurtainGone] = useState(false);
+  const curtainWasGone = useRef(false);
   const cursor = useCursorDrift(!reduce);
 
   const { scrollYProgress } = useScroll({
@@ -216,7 +219,15 @@ export function Hero() {
     const zoom = 1.12 - 0.12 * lift.get();
     return mobileOn.get() ? 1 : zoom;
   });
-  useMotionValueEvent(lift, "change", (value) => setCurtainGone(value >= 0.999));
+  useMotionValueEvent(lift, "change", (value) => {
+    const gone = value >= 0.999;
+    if (gone === curtainWasGone.current) return;
+    curtainWasGone.current = gone;
+    setCurtainGone(gone);
+    // On phones, returning to the curtain must restore its poster. Reset readiness
+    // here so the next reveal waits for a fresh decoded frame before fading in.
+    if (!gone && smallScreen) setVideoVisible(false);
+  });
   const hintOpacity = useTransform(() => 1 - clamp01(progress.get() / 0.1));
 
   const line1 = useRise(progress, motionOn, REVEAL_AT[0]);
@@ -269,6 +280,8 @@ export function Hero() {
       setVideoVisible(true);
     });
   };
+
+  const showVideo = videoVisible && (!smallScreen || curtainGone);
 
   // Keyboard users tabbing to the still-hidden link: jump to where it is shown.
   const revealForFocus = () => {
@@ -325,8 +338,9 @@ export function Hero() {
                   ref={videoRef}
                   className={cn(
                     "absolute inset-0 size-full object-cover object-(--focus-mobile) transition-opacity duration-1000 sm:object-(--focus-desktop)",
-                    videoVisible ? "opacity-100" : "opacity-0",
+                    showVideo ? "opacity-100" : "opacity-0",
                   )}
+                  style={{ transitionDuration: smallScreen && !showVideo ? "0ms" : undefined }}
                   muted
                   loop
                   playsInline
