@@ -8,6 +8,7 @@ import {
   motion,
   useInView,
   useMotionValue,
+  useMotionValueEvent,
   useReducedMotion,
   useScroll,
   useSpring,
@@ -45,6 +46,14 @@ const clamp01 = (value: number) => Math.min(Math.max(value, 0), 1);
 
 /** For `useSyncExternalStore` as a "has hydrated" flag: nothing to subscribe to. */
 const subscribeNothing = () => () => {};
+
+/** Phones and small tablets: the curtain lifts as one flat layer (see ParallaxScene `still`). */
+const SMALL_SCREEN = "(max-width: 1023px)";
+const subscribeSmallScreen = (onChange: () => void) => {
+  const query = window.matchMedia(SMALL_SCREEN);
+  query.addEventListener("change", onChange);
+  return () => query.removeEventListener("change", onChange);
+};
 
 /** Load-in for the opening scene's copy: rises out of a blur; `custom` is its delay in seconds. */
 const RISE_VARIANTS: Variants = {
@@ -98,15 +107,15 @@ function useCursorDrift(enabled: boolean) {
 
 /**
  * Scroll-linked rise: 0 → 1 as scroll passes `start` (over REVEAL_SPAN), always 1 with
- * motion off. Returns the value and a matching fade / lift / un-blur style.
+ * motion off. Returns the value and a matching fade / lift style. Opacity and transform
+ * only: an animated blur would repaint the huge headline on every scroll frame.
  */
 function useRise(progress: MotionValue<number>, motionOn: MotionValue<number>, start: number) {
   const value = useTransform(
     () => 1 - (1 - clamp01((progress.get() - start) / REVEAL_SPAN)) * motionOn.get(),
   );
   const y = useTransform(value, (v) => 32 * (1 - v));
-  const filter = useTransform(value, (v) => `blur(${8 * (1 - v)}px)`);
-  return { value, style: { opacity: value, y, filter } };
+  return { value, style: { opacity: value, y } };
 }
 
 export function Hero() {
@@ -118,11 +127,18 @@ export function Hero() {
   // after hydration so the first client render matches the server HTML.
   const hydrated = useSyncExternalStore(subscribeNothing, () => true, () => false);
   const reduce = hydrated && Boolean(prefersReducedMotion);
+  const smallScreen = useSyncExternalStore(
+    subscribeSmallScreen,
+    () => window.matchMedia(SMALL_SCREEN).matches,
+    () => false,
+  );
 
   const [videoVisible, setVideoVisible] = useState(false);
   const [videoFailed, setVideoFailed] = useState(false);
 
   const inView = useInView(stageRef, { amount: 0.1 });
+  /** True once any of the clip is uncovered; until then decoding it is wasted work. */
+  const [uncovered, setUncovered] = useState(false);
   const cursor = useCursorDrift(!reduce);
 
   const { scrollYProgress } = useScroll({
@@ -140,10 +156,13 @@ export function Hero() {
     () => 1 - (1 - clamp01(scrollYProgress.get() / LIFT_END)) * motionOn.get(),
   );
   const curtainY = useTransform(() => `${-100 * lift.get()}%`);
+  // Once fully lifted the curtain is off screen: stop compositing its big photo layers.
+  const curtainVisibility = useTransform(() => (lift.get() >= 0.999 ? "hidden" : "visible"));
   // Plates start at their mid-scroll offsets (the composition that frames "ARMENIA"
   // behind the peaks) and keep sinking as the curtain lifts.
   const plateProgress = useTransform(() => 0.5 + 0.5 * lift.get());
   const videoScale = useTransform(() => 1.12 - 0.12 * lift.get());
+  useMotionValueEvent(lift, "change", (value) => setUncovered(value > 0.01));
   const hintOpacity = useTransform(() => 1 - clamp01(scrollYProgress.get() / 0.1));
 
   const line1 = useRise(scrollYProgress, motionOn, REVEAL_AT[0]);
@@ -165,12 +184,12 @@ export function Hero() {
   useEffect(() => {
     const video = videoRef.current;
     if (!video || videoFailed || prefersReducedMotion === null) return;
-    if (prefersReducedMotion || !inView) {
+    if (prefersReducedMotion || !inView || !uncovered) {
       video.pause();
     } else {
       void play();
     }
-  }, [prefersReducedMotion, inView, videoFailed, play]);
+  }, [prefersReducedMotion, inView, uncovered, videoFailed, play]);
 
   // Keyboard users tabbing to the still-hidden link: jump to where it is shown.
   const revealForFocus = () => {
@@ -244,19 +263,19 @@ export function Hero() {
         <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center px-4 text-center text-warm-white sm:px-8">
           <h1 className="font-display text-[clamp(2.375rem,1.55rem+3.6vw,5.5rem)] leading-[1.04] font-semibold tracking-[-0.03em] [text-shadow:0_2px_24px_rgba(0,35,44,0.35)]">
             <span className="sr-only">{hero.headline.join(" ")}</span>
-            <motion.span aria-hidden="true" className="block whitespace-nowrap" style={line1.style}>
+            <motion.span aria-hidden="true" className="block whitespace-nowrap will-change-transform" style={line1.style}>
               {hero.headline[0]}
             </motion.span>
             <motion.span
               aria-hidden="true"
-              className="block whitespace-nowrap text-warm-white/70"
+              className="block whitespace-nowrap text-warm-white/70 will-change-transform"
               style={line2.style}
             >
               {hero.headline[1]}
             </motion.span>
           </h1>
           <motion.div
-            className="mt-6 sm:mt-8"
+            className="mt-6 will-change-transform sm:mt-8"
             style={{ ...link.style, pointerEvents: linkPointer }}
             onFocusCapture={revealForFocus}
           >
@@ -278,7 +297,7 @@ export function Hero() {
         {/* Curtain: the Ararat scene, lifting away with scroll */}
         <motion.div
           className="absolute inset-0 z-10 bg-ocean-950 shadow-[0_40px_80px_-20px_rgba(0,0,0,0.65)] will-change-transform"
-          style={{ y: curtainY }}
+          style={{ y: curtainY, visibility: curtainVisibility }}
           aria-hidden={reduce || undefined}
         >
           <ParallaxScene
@@ -286,6 +305,7 @@ export function Hero() {
             focus={{ x: 0.6, y: 0.5 }}
             headroom={0.3}
             progress={plateProgress}
+            still={smallScreen}
             className="h-full"
           >
             {/* The sky plate is the full photo, so it carries the description */}

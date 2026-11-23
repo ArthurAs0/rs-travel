@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import { motion, useMotionValueEvent, useScroll } from "motion/react";
 import { cn } from "@/lib/utils";
@@ -15,18 +15,26 @@ export function SiteHeader() {
   const { scrollY } = useScroll();
   const [condensed, setCondensed] = useState(false);
 
-  // Switch to the floating pill once most of the hero has scrolled away (measured, so
-  // it still holds if the hero's height changes).
-  const update = (y: number) => {
-    const heroHeight = document.getElementById("top")?.offsetHeight ?? window.innerHeight;
-    setCondensed(y > heroHeight - window.innerHeight * 0.3);
-  };
+  // Switch to the floating pill once most of the hero has scrolled away. The threshold
+  // is measured on load and resize only: reading layout on every scroll event would
+  // force a reflow per frame.
+  const threshold = useRef(0);
+  const update = (y: number) => setCondensed(y > threshold.current);
   useMotionValueEvent(scrollY, "change", update);
 
-  // Pick the right state when the page loads already scrolled (refresh, anchor link).
   useEffect(() => {
-    const frame = requestAnimationFrame(() => update(window.scrollY));
-    return () => cancelAnimationFrame(frame);
+    const measure = () => {
+      const heroHeight = document.getElementById("top")?.offsetHeight ?? window.innerHeight;
+      threshold.current = heroHeight - window.innerHeight * 0.3;
+      setCondensed(window.scrollY > threshold.current);
+    };
+    // Also picks the right state when the page loads already scrolled (refresh, anchor link).
+    const frame = requestAnimationFrame(measure);
+    window.addEventListener("resize", measure);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener("resize", measure);
+    };
   }, []);
 
   return (

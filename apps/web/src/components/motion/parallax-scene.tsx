@@ -31,6 +31,7 @@ import { cn } from "@/lib/utils";
 type SceneContextValue = {
   progress: MotionValue<number>;
   motionOn: MotionValue<number>;
+  still: boolean;
 };
 
 const SceneContext = createContext<SceneContextValue | null>(null);
@@ -47,6 +48,12 @@ type ParallaxSceneProps = {
    * e.g. when the scene sits on a pinned stage that moves by other means.
    */
   progress?: MotionValue<number>;
+  /**
+   * Hold every layer at its mid offset and skip layer promotion, so the scene paints
+   * as one flat image. For small screens, where several screen-sized moving layers at
+   * high pixel density cost more GPU memory than the subtle depth is worth.
+   */
+  still?: boolean;
   className?: string;
   children: React.ReactNode;
 };
@@ -56,6 +63,7 @@ export function ParallaxScene({
   focus = { x: 0.5, y: 0.5 },
   headroom = 0.3,
   progress,
+  still = false,
   className,
   children,
 }: ParallaxSceneProps) {
@@ -89,7 +97,7 @@ export function ParallaxScene({
         className="absolute inset-x-0 bottom-0 [container-type:size]"
         style={{ top: `${-headroom * 100}%`, ...stageVars }}
       >
-        <SceneContext.Provider value={{ progress: progress ?? scrollYProgress, motionOn }}>
+        <SceneContext.Provider value={{ progress: progress ?? scrollYProgress, motionOn, still }}>
           {children}
         </SceneContext.Provider>
       </div>
@@ -115,18 +123,19 @@ type ParallaxLayerProps = {
 export function ParallaxLayer({ depth, fit = "plate", className, children }: ParallaxLayerProps) {
   const scene = useContext(SceneContext);
   if (!scene) throw new Error("ParallaxLayer must be used inside a ParallaxScene");
-  const { progress, motionOn } = scene;
+  const { progress, motionOn, still } = scene;
 
-  // With reduced motion, layers rest at their mid-scroll offsets.
+  // With reduced motion (or a still scene), layers rest at their mid-scroll offsets.
   const y = useTransform(() => {
-    const p = motionOn.get() ? progress.get() : 0.5;
+    const p = motionOn.get() && !still ? progress.get() : 0.5;
     return `${depth * 100 * p}%`;
   });
 
   return (
     <motion.div
       className={cn(
-        "absolute top-(--plx-top) h-(--plx-h) will-change-transform",
+        "absolute top-(--plx-top) h-(--plx-h)",
+        !still && "will-change-transform",
         fit === "plate" ? "left-(--plx-left) w-(--plx-w)" : "inset-x-0",
         className,
       )}
