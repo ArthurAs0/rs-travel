@@ -4,30 +4,28 @@
  */
 
 export type HeroContent = {
-  eyebrow: string;
   /** Rendered as separate lines, in this order. */
   headline: [string, string];
-  copy: string;
-  primaryCta: string;
-  secondaryCta: string;
+  /** Text link under the headline, pointing at the destinations section. */
+  exploreCta: string;
+  /** Label on the opening scene inviting the visitor to scroll it away. */
+  scrollHint: string;
   video: {
     /** Ordered: the first source whose `media` query matches is played. */
     sources: { src: string; type: string; media?: string }[];
-    /** Matching still frame, shown before the clip plays and if it cannot play. */
+    /** Matching still frame, shown before the clip plays, if it cannot play, and for reduced motion. */
     poster: string;
     posterAlt: string;
-    /** CSS object-position used to keep the subject in frame on narrow screens. */
+    /** CSS object-position keeping Ararat in frame, in the card and full screen. */
     focus: { desktop: string; mobile: string };
     credit?: { label: string; href: string };
   };
 };
 
 export const hero: HeroContent = {
-  eyebrow: "Armenia · Private & small-group travel",
   headline: ["See Armenia", "at your own pace."],
-  copy: "Private and small-group tours, shaped around your interests.",
-  primaryCta: "Plan your trip",
-  secondaryCta: "Explore destinations",
+  exploreCta: "Explore destinations",
+  scrollHint: "Scroll to explore",
   video: {
     // Placeholder footage until the agency supplies originals: "Ararat Mountain" by
     // Armen Harutyunyan (Pexels licence, free to use). Re-graded, cropped, looped.
@@ -74,4 +72,22 @@ export const placesIntro = {
   eyebrow: "Destinations",
   title: "Places to explore",
   copy: "Cliff-top monasteries in Syunik, autumn forests around Dilijan, the pink-stone streets of Yerevan, and lesser-known landscapes beyond the usual stops.",
+};
+
+/**
+ * Opening scene of the hero (it lifts away to reveal the clip): the Khor Virap photo
+ * (Dusan Stupar / Pexels) cut into sky, mountain and foreground plates. See MEDIA.md.
+ */
+export const araratScene = {
+  title: "Armenia",
+  place: "Khor Virap · Ararat plain",
+  copy: "Mount Ararat from Khor Virap, one of the closest views of the mountain.",
+  alt: "Mount Ararat and Little Ararat rising above the green Ararat plain, seen from Khor Virap Monastery",
+  /** Width / height of every plate (1920 × 1500: the photo plus 300 px of extra sky). */
+  aspect: 1920 / 1500,
+  plates: {
+    sky: "/images/parallax/khor-virap/sky.webp",
+    mountains: "/images/parallax/khor-virap/mountains.webp",
+    foreground: "/images/parallax/khor-virap/foreground.webp",
+  },
 };

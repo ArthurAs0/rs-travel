@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import { motion, useInView, useReducedMotion } from "motion/react";
-import { Pause, Play } from "lucide-react";
 import { Reveal } from "@/components/motion/reveal";
 import { CoverflowCarousel, type CoverflowSlide } from "@/components/ui/coverflow-carousel";
 import { placesIntro } from "@/lib/content/home";
@@ -35,8 +34,6 @@ export function PlacesIntro() {
 
   const [active, setActive] = useState(0);
   const [visited, setVisited] = useState<ReadonlySet<number>>(() => new Set([0]));
-  const [pausedByVisitor, setPausedByVisitor] = useState(false);
-  const [isPlaying, setIsPlaying] = useState(false);
 
   // Stable, because the carousel calls it from an effect.
   const handleSelect = useCallback((index: number) => {
@@ -44,8 +41,7 @@ export function PlacesIntro() {
     setVisited((current) => (current.has(index) ? current : new Set(current).add(index)));
   }, []);
 
-  const activeHasVideo = Boolean(destinations[active].backdrop.video);
-  const canPlay = sectionSeen && inView && prefersReducedMotion === false && !pausedByVisitor;
+  const canPlay = sectionSeen && inView && prefersReducedMotion === false;
 
   return (
     <section
@@ -71,12 +67,7 @@ export function PlacesIntro() {
               )}
             >
               {place.backdrop.video ? (
-                <BackdropVideo
-                  place={place}
-                  load={shouldLoad}
-                  playing={isActive && canPlay}
-                  onPlayingChange={isActive ? setIsPlaying : undefined}
-                />
+                <BackdropVideo place={place} load={shouldLoad} playing={isActive && canPlay} />
               ) : (
                 <motion.div
                   className="absolute inset-0"
@@ -102,9 +93,10 @@ export function PlacesIntro() {
           );
         })}
 
-        {/* Tint for legibility; a soft fade at the top joins it to the hero */}
+        {/* Tint for legibility; soft fades join it to the sections above and below */}
         <div className="absolute inset-0 bg-ocean-950/55" />
         <div className="absolute inset-x-0 top-0 h-40 bg-gradient-to-b from-ocean-950 to-transparent" />
+        <div className="absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-ocean-950 to-transparent" />
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_30%,rgba(0,35,44,0.6)_100%)]" />
       </div>
 
@@ -138,25 +130,12 @@ export function PlacesIntro() {
           showCaption
           showNavigation
           showPagination
+          autoplay
+          autoplayInterval={4500}
           cardClassName="rounded-3xl shadow-[0_30px_70px_-25px_rgba(0,0,0,0.7)] ring-1 ring-white/10"
         />
       </Reveal>
 
-      {/* Pause control, shown while the centred place has footage */}
-      {activeHasVideo && (
-        <button
-          type="button"
-          onClick={() => setPausedByVisitor(isPlaying)}
-          aria-label={isPlaying ? "Pause background video" : "Play background video"}
-          className="absolute right-4 bottom-5 inline-flex size-11 items-center justify-center rounded-full border border-white/30 bg-ocean-950/40 text-white backdrop-blur-md transition-colors hover:bg-ocean-950/60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white sm:right-6 sm:bottom-6"
-        >
-          {isPlaying ? (
-            <Pause className="size-4" aria-hidden="true" />
-          ) : (
-            <Play className="size-4 translate-x-px" aria-hidden="true" />
-          )}
-        </button>
-      )}
     </section>
   );
 }
@@ -166,12 +145,10 @@ function BackdropVideo({
   place,
   load,
   playing,
-  onPlayingChange,
 }: {
   place: Destination;
   load: boolean;
   playing: boolean;
-  onPlayingChange?: (playing: boolean) => void;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const video = place.backdrop.video;
@@ -186,17 +163,12 @@ function BackdropVideo({
     if (!element || !load) return;
     if (playing) {
       element.play().catch(() => {
-        // Autoplay blocked: the poster stays and the button offers Play.
+        // Autoplay blocked: the poster stays visible.
       });
     } else {
       element.pause();
     }
   }, [playing, load]);
-
-  // Keep the button in sync when this layer becomes the active one.
-  useEffect(() => {
-    if (onPlayingChange && videoRef.current) onPlayingChange(!videoRef.current.paused);
-  }, [onPlayingChange]);
 
   if (!video) return null;
 
@@ -210,8 +182,6 @@ function BackdropVideo({
       preload={load ? "auto" : "none"}
       poster={place.backdrop.image}
       tabIndex={-1}
-      onPlaying={() => onPlayingChange?.(true)}
-      onPause={() => onPlayingChange?.(false)}
     >
       {load &&
         video.sources.map((source) => (

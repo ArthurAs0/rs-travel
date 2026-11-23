@@ -20,4 +20,16 @@
 
 To swap the hero clip, replace the files above (keep the names) or edit `src/lib/content/home.ts`.
 
+The hero opens on the Ararat parallax scene (plates below); scrolling lifts it away to reveal the clip.
+
 Pexels photos are free to use without attribution; credits are kept here and in `src/lib/mock-data/destinations.ts` (`credit`). All destination images are 900 × 900 square crops.
+
+## Ararat parallax plates
+
+`public/images/parallax/khor-virap/` — `sky.webp`, `mountains.webp`, `foreground.webp` (1920 × 1500 each) are cut from `backdrops/khor-virap.jpg` (Dusan Stupar, Pexels 34146317) for the opening scene of the hero in `src/components/sections/hero.tsx`:
+
+- **sky**: the whole photo, plus 300 px of mirrored, blurred sky on top (uncovered as the layer sinks).
+- **mountains**: transparent above a hand-traced Ararat skyline, opaque down to just past the near road.
+- **foreground**: everything below the road, including the Khor Virap spire.
+
+All three share one canvas, so they stay aligned. To use a different photo, cut new plates the same way (same size for every plate, extra sky on top) and update `araratScene` in `src/lib/content/home.ts`. Agency photo of the same view would be a straight upgrade.

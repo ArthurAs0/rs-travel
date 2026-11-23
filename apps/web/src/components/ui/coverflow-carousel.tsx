@@ -45,6 +45,13 @@ export interface CoverflowCarouselProps {
   tone?: "light" | "dark";
   /** Called whenever the centred card changes. */
   onSelectedChange?: (index: number) => void;
+  /**
+   * Advance on its own. Pauses while hovered or focused, stops for good once the
+   * visitor drags, clicks or uses the controls, and never runs with reduced motion.
+   */
+  autoplay?: boolean;
+  /** Milliseconds between automatic steps. */
+  autoplayInterval?: number;
   className?: string;
   cardClassName?: string;
 }
@@ -69,6 +76,8 @@ export function CoverflowCarousel({
   label = "Cover carousel",
   tone = "light",
   onSelectedChange,
+  autoplay = false,
+  autoplayInterval = 4500,
   className,
   cardClassName,
 }: CoverflowCarouselProps) {
@@ -94,6 +103,12 @@ export function CoverflowCarousel({
   } | null>(null);
 
   const [selected, setSelected] = React.useState(0);
+  const [prefersReducedMotion, setPrefersReducedMotion] = React.useState(false);
+  /** Autoplay bookkeeping: temporary pauses vs. a deliberate stop. */
+  const [hovered, setHovered] = React.useState(false);
+  const [focusWithin, setFocusWithin] = React.useState(false);
+  const [onScreen, setOnScreen] = React.useState(false);
+  const [stopped, setStopped] = React.useState(false);
 
   React.useEffect(() => {
     onSelectedChange?.(selected);
@@ -103,6 +118,7 @@ export function CoverflowCarousel({
     const query = window.matchMedia("(prefers-reduced-motion: reduce)");
     const update = () => {
       reduceMotionRef.current = query.matches;
+      setPrefersReducedMotion(query.matches);
     };
     update();
     query.addEventListener("change", update);
@@ -152,7 +168,7 @@ export function CoverflowCarousel({
   }, [count, depth, fade, falloff, gap, loop, rotate]);
 
   const settle = React.useCallback(
-    (target: number) => {
+    (target: number, ease = 0.16) => {
       if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
       targetRef.current = target;
       setSelected(indexAt(target));
@@ -173,7 +189,7 @@ export function CoverflowCarousel({
           return;
         }
         // Exponential ease-out (no overshoot).
-        posRef.current += remaining * 0.16;
+        posRef.current += remaining * ease;
         paint();
         rafRef.current = requestAnimationFrame(step);
       };
@@ -199,11 +215,40 @@ export function CoverflowCarousel({
   );
 
   const nudge = React.useCallback(
-    (by: number) => settle(clamp(Math.round(targetRef.current) + by)),
+    (by: number, ease?: number) => settle(clamp(Math.round(targetRef.current) + by), ease),
     [clamp, settle],
   );
 
+  /** Wrap any deliberate interaction: the visitor has taken over, so autoplay stops. */
+  const takeOver = React.useCallback(() => {
+    if (autoplay) setStopped(true);
+  }, [autoplay]);
+
+  // Only cycle while the carousel is actually on screen.
+  React.useEffect(() => {
+    const frame = frameRef.current;
+    if (!autoplay || !frame) return;
+    const observer = new IntersectionObserver(([entry]) => setOnScreen(entry.isIntersecting), {
+      threshold: 0.35,
+    });
+    observer.observe(frame);
+    return () => observer.disconnect();
+  }, [autoplay]);
+
+  const autoplayRunning =
+    autoplay && !stopped && !hovered && !focusWithin && onScreen && !prefersReducedMotion;
+
+  React.useEffect(() => {
+    if (!autoplayRunning) return;
+    const id = window.setInterval(() => {
+      if (document.hidden || dragRef.current) return;
+      nudge(1, 0.055); // a slower, gentler glide than a click
+    }, autoplayInterval);
+    return () => window.clearInterval(id);
+  }, [autoplayRunning, autoplayInterval, nudge]);
+
   const onPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    takeOver();
     if (rafRef.current !== null) {
       cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
@@ -308,6 +353,12 @@ export function CoverflowCarousel({
       role="region"
       aria-roledescription="carousel"
       aria-label={label}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      onFocus={() => setFocusWithin(true)}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFocusWithin(false);
+      }}
     >
       <div className="relative">
         <div
@@ -320,9 +371,11 @@ export function CoverflowCarousel({
           onKeyDown={(event) => {
             if (event.key === "ArrowLeft") {
               event.preventDefault();
+              takeOver();
               nudge(-1);
             } else if (event.key === "ArrowRight") {
               event.preventDefault();
+              takeOver();
               nudge(1);
             }
           }}
@@ -377,7 +430,10 @@ export function CoverflowCarousel({
             <button
               type="button"
               aria-label="Previous slide"
-              onClick={() => nudge(-1)}
+              onClick={() => {
+                takeOver();
+                nudge(-1);
+              }}
               className="absolute top-1/2 left-3 z-[200] -translate-y-1/2 rounded-full border border-ocean-900/10 bg-cloud/90 p-3 text-ocean-800 shadow-md backdrop-blur transition hover:bg-sun hover:text-ocean-950 sm:left-6"
             >
               <ChevronLeft className="size-5" />
@@ -385,7 +441,10 @@ export function CoverflowCarousel({
             <button
               type="button"
               aria-label="Next slide"
-              onClick={() => nudge(1)}
+              onClick={() => {
+                takeOver();
+                nudge(1);
+              }}
               className="absolute top-1/2 right-3 z-[200] -translate-y-1/2 rounded-full border border-ocean-900/10 bg-cloud/90 p-3 text-ocean-800 shadow-md backdrop-blur transition hover:bg-sun hover:text-ocean-950 sm:right-6"
             >
               <ChevronRight className="size-5" />
@@ -449,7 +508,10 @@ export function CoverflowCarousel({
               type="button"
               aria-label={`Go to slide ${index + 1}${slide.title ? `: ${slide.title}` : ""}`}
               aria-current={index === selected}
-              onClick={() => goTo(index)}
+              onClick={() => {
+                takeOver();
+                goTo(index);
+              }}
               className={cn(
                 "h-2 rounded-full transition-all duration-300",
                 dark ? "bg-cloud" : "bg-ocean-700",
