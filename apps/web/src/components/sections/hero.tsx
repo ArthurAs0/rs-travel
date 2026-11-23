@@ -33,6 +33,18 @@ const EASE = [0.22, 1, 0.36, 1] as const;
  *
  * With reduced motion the section is one screen tall and shows the end state, the
  * clip paused on its matching still frame.
+ *
+ * Small screens (below `lg`) differ:
+ *   - the stage is exactly 100svh (no 600px floor), so it never outgrows the viewport
+ *     and releases before the curtain is up;
+ *   - the section is 300svh, so the curtain lifts over one full stage height of scroll
+ *     and moves 1:1 with the finger;
+ *   - progress is measured against the pin's own travel (section − stage, both in svh)
+ *     rather than the viewport, so the mobile toolbar showing or hiding mid-scroll
+ *     doesn't shift it;
+ *   - only the curtain's vertical position animates (no plate parallax, no clip zoom);
+ *   - the clip's backdrop reaches 100lvh, so no strip of section background shows
+ *     under the stage while the toolbar is collapsed.
  */
 const LIFT_END = 0.5;
 /** Start of each headline line and of the link (each rises over REVEAL_SPAN). */
@@ -135,6 +147,8 @@ export function Hero() {
 
   const [videoVisible, setVideoVisible] = useState(false);
   const [videoFailed, setVideoFailed] = useState(false);
+  /** Pending `requestVideoFrameCallback` id while waiting for the clip's first frame. */
+  const frameRequest = useRef<number | null>(null);
 
   const inView = useInView(stageRef, { amount: 0.1 });
   /**
@@ -154,10 +168,42 @@ export function Hero() {
   useEffect(() => {
     motionOn.set(reduce ? 0 : 1);
   }, [reduce, motionOn]);
+  // 1 = small-screen behaviour (see the component comment).
+  const mobileOn = useMotionValue(0);
+  useEffect(() => {
+    mobileOn.set(smallScreen ? 1 : 0);
+  }, [smallScreen, mobileOn]);
+
+  // Small screens: progress over the pin's own travel. Both sizes are in svh, so they
+  // only change on rotation or real resizes, not when the toolbar shows or hides.
+  const { scrollY } = useScroll();
+  const pinTop = useMotionValue(0);
+  const pinTravel = useMotionValue(1);
+  useEffect(() => {
+    const section = sectionRef.current;
+    const stage = stageRef.current;
+    if (!section || !stage) return;
+    const measure = () => {
+      pinTop.set(section.getBoundingClientRect().top + window.scrollY);
+      pinTravel.set(Math.max(section.offsetHeight - stage.offsetHeight, 1));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(section);
+    observer.observe(stage);
+    return () => observer.disconnect();
+  }, [pinTop, pinTravel]);
+
+  /** 0 → 1 over the hero's scroll. Every source is read so all stay subscribed. */
+  const progress = useTransform(() => {
+    const pinned = clamp01((scrollY.get() - pinTop.get()) / pinTravel.get());
+    const page = scrollYProgress.get();
+    return mobileOn.get() ? pinned : page;
+  });
 
   /** 0 → 1 as the scene lifts away; 1 under reduced motion. */
   const lift = useTransform(
-    () => 1 - (1 - clamp01(scrollYProgress.get() / LIFT_END)) * motionOn.get(),
+    () => 1 - (1 - clamp01(progress.get() / LIFT_END)) * motionOn.get(),
   );
   const curtainY = useTransform(() => `${-100 * lift.get()}%`);
   // Once fully lifted the curtain is off screen: stop compositing its big photo layers.
@@ -165,13 +211,17 @@ export function Hero() {
   // Plates start at their mid-scroll offsets (the composition that frames "ARMENIA"
   // behind the peaks) and keep sinking as the curtain lifts.
   const plateProgress = useTransform(() => 0.5 + 0.5 * lift.get());
-  const videoScale = useTransform(() => 1.12 - 0.12 * lift.get());
+  // The clip eases out of a slight zoom as it is uncovered; held still on small screens.
+  const videoScale = useTransform(() => {
+    const zoom = 1.12 - 0.12 * lift.get();
+    return mobileOn.get() ? 1 : zoom;
+  });
   useMotionValueEvent(lift, "change", (value) => setCurtainGone(value >= 0.999));
-  const hintOpacity = useTransform(() => 1 - clamp01(scrollYProgress.get() / 0.1));
+  const hintOpacity = useTransform(() => 1 - clamp01(progress.get() / 0.1));
 
-  const line1 = useRise(scrollYProgress, motionOn, REVEAL_AT[0]);
-  const line2 = useRise(scrollYProgress, motionOn, REVEAL_AT[1]);
-  const link = useRise(scrollYProgress, motionOn, REVEAL_AT[2]);
+  const line1 = useRise(progress, motionOn, REVEAL_AT[0]);
+  const line2 = useRise(progress, motionOn, REVEAL_AT[1]);
+  const link = useRise(progress, motionOn, REVEAL_AT[2]);
   const linkPointer = useTransform(() => (link.value.get() > 0.5 ? "auto" : "none"));
 
   const play = useCallback(async () => {
@@ -184,23 +234,49 @@ export function Hero() {
     }
   }, []);
 
+  const cancelFrameRequest = useCallback(() => {
+    const video = videoRef.current;
+    if (video && frameRequest.current !== null) {
+      video.cancelVideoFrameCallback(frameRequest.current);
+    }
+    frameRequest.current = null;
+  }, []);
+
   // Autoplay only when motion is welcome and the hero is on screen.
   useEffect(() => {
     const video = videoRef.current;
     if (!video || videoFailed || prefersReducedMotion === null) return;
     if (prefersReducedMotion || !inView || !curtainGone) {
+      // Curtain back down before the first frame arrived: keep showing the poster.
+      cancelFrameRequest();
       video.pause();
     } else {
       void play();
     }
-  }, [prefersReducedMotion, inView, curtainGone, videoFailed, play]);
+  }, [prefersReducedMotion, inView, curtainGone, videoFailed, play, cancelFrameRequest]);
+
+  // Fade the clip in over its poster only once a decoded frame is on screen, so the
+  // fade never starts from a blank element. `playing` alone can fire before that.
+  const onPlaying = () => {
+    const video = videoRef.current;
+    if (!video || videoVisible || frameRequest.current !== null) return;
+    if (typeof video.requestVideoFrameCallback !== "function") {
+      setVideoVisible(true);
+      return;
+    }
+    frameRequest.current = video.requestVideoFrameCallback(() => {
+      frameRequest.current = null;
+      setVideoVisible(true);
+    });
+  };
 
   // Keyboard users tabbing to the still-hidden link: jump to where it is shown.
   const revealForFocus = () => {
     const section = sectionRef.current;
-    if (!section || link.value.get() > 0.99) return;
+    const stage = stageRef.current;
+    if (!section || !stage || link.value.get() > 0.99) return;
     const top = section.getBoundingClientRect().top + window.scrollY;
-    const travel = section.offsetHeight - window.innerHeight;
+    const travel = section.offsetHeight - (smallScreen ? stage.offsetHeight : window.innerHeight);
     window.scrollTo({
       top: top + travel * (REVEAL_AT[2] + REVEAL_SPAN + 0.02),
       behavior: "instant",
@@ -218,50 +294,61 @@ export function Hero() {
       ref={sectionRef}
       id="top"
       aria-label="Introduction"
-      className={cn("relative bg-ocean-950", reduce ? "h-svh min-h-[600px]" : "h-[260svh]")}
+      className={cn(
+        // Small screens clip (not hide, which would break the sticky stage) the
+        // backdrop's 100lvh overhang so it never paints over the next section.
+        "relative bg-ocean-950 max-lg:overflow-clip",
+        reduce ? "h-svh lg:min-h-[600px]" : "h-[300svh] lg:h-[260svh]",
+      )}
     >
-      <div ref={stageRef} className="sticky top-0 isolate h-svh min-h-[600px] overflow-hidden">
-        {/* The clip, waiting under the curtain */}
-        <motion.div className="absolute inset-0" style={cursor}>
-          <motion.div
-            className="absolute inset-0 will-change-transform"
-            style={{ ...focusVars, scale: videoScale }}
-          >
-            <Image
-              src={hero.video.poster}
-              alt={hero.video.posterAlt}
-              fill
-              sizes="100vw"
-              className="object-cover object-(--focus-mobile) sm:object-(--focus-desktop)"
-            />
-            {!videoFailed && (
-              <video
-                ref={videoRef}
-                className={cn(
-                  "absolute inset-0 size-full object-cover object-(--focus-mobile) transition-opacity duration-1000 sm:object-(--focus-desktop)",
-                  videoVisible ? "opacity-100" : "opacity-0",
-                )}
-                muted
-                loop
-                playsInline
-                preload="auto"
-                poster={hero.video.poster}
-                aria-hidden="true"
-                tabIndex={-1}
-                onPlaying={() => setVideoVisible(true)}
-                onError={() => setVideoFailed(true)}
-              >
-                {hero.video.sources.map((source) => (
-                  <source key={source.src} src={source.src} type={source.type} media={source.media} />
-                ))}
-              </video>
-            )}
+      <div
+        ref={stageRef}
+        className="sticky top-0 isolate h-svh lg:min-h-[600px] lg:overflow-hidden"
+      >
+        {/* The clip, waiting under the curtain. 100lvh tall on small screens, so it
+            still fills the screen when the toolbar collapses below the 100svh stage. */}
+        <div className="absolute inset-x-0 top-0 h-full overflow-hidden max-lg:h-lvh">
+          <motion.div className="absolute inset-0" style={cursor}>
+            <motion.div
+              className="absolute inset-0 lg:will-change-transform"
+              style={{ ...focusVars, scale: videoScale }}
+            >
+              <Image
+                src={hero.video.poster}
+                alt={hero.video.posterAlt}
+                fill
+                sizes="100vw"
+                className="object-cover object-(--focus-mobile) sm:object-(--focus-desktop)"
+              />
+              {!videoFailed && (
+                <video
+                  ref={videoRef}
+                  className={cn(
+                    "absolute inset-0 size-full object-cover object-(--focus-mobile) transition-opacity duration-1000 sm:object-(--focus-desktop)",
+                    videoVisible ? "opacity-100" : "opacity-0",
+                  )}
+                  muted
+                  loop
+                  playsInline
+                  preload="auto"
+                  poster={hero.video.poster}
+                  aria-hidden="true"
+                  tabIndex={-1}
+                  onPlaying={onPlaying}
+                  onError={() => setVideoFailed(true)}
+                >
+                  {hero.video.sources.map((source) => (
+                    <source key={source.src} src={source.src} type={source.type} media={source.media} />
+                  ))}
+                </video>
+              )}
+            </motion.div>
           </motion.div>
-        </motion.div>
-        <div
-          aria-hidden="true"
-          className="absolute inset-0 bg-[linear-gradient(180deg,rgba(0,35,44,0.6)_0%,rgba(0,35,44,0.25)_30%,rgba(0,35,44,0.25)_60%,rgba(0,35,44,0.7)_100%)]"
-        />
+          <div
+            aria-hidden="true"
+            className="absolute inset-0 bg-[linear-gradient(180deg,rgba(0,35,44,0.6)_0%,rgba(0,35,44,0.25)_30%,rgba(0,35,44,0.25)_60%,rgba(0,35,44,0.7)_100%)]"
+          />
+        </div>
 
         {/* Headline and link over the clip, rising in once the curtain is up */}
         <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center px-4 text-center text-warm-white sm:px-8">
