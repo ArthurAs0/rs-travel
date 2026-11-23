@@ -137,8 +137,12 @@ export function Hero() {
   const [videoFailed, setVideoFailed] = useState(false);
 
   const inView = useInView(stageRef, { amount: 0.1 });
-  /** True once any of the clip is uncovered; until then decoding it is wasted work. */
-  const [uncovered, setUncovered] = useState(false);
+  /**
+   * True once the curtain has fully lifted. The clip starts only then, so starting and
+   * decoding it never competes with the lift animation; until then its matching still
+   * frame shows through.
+   */
+  const [curtainGone, setCurtainGone] = useState(false);
   const cursor = useCursorDrift(!reduce);
 
   const { scrollYProgress } = useScroll({
@@ -162,7 +166,7 @@ export function Hero() {
   // behind the peaks) and keep sinking as the curtain lifts.
   const plateProgress = useTransform(() => 0.5 + 0.5 * lift.get());
   const videoScale = useTransform(() => 1.12 - 0.12 * lift.get());
-  useMotionValueEvent(lift, "change", (value) => setUncovered(value > 0.01));
+  useMotionValueEvent(lift, "change", (value) => setCurtainGone(value >= 0.999));
   const hintOpacity = useTransform(() => 1 - clamp01(scrollYProgress.get() / 0.1));
 
   const line1 = useRise(scrollYProgress, motionOn, REVEAL_AT[0]);
@@ -184,12 +188,12 @@ export function Hero() {
   useEffect(() => {
     const video = videoRef.current;
     if (!video || videoFailed || prefersReducedMotion === null) return;
-    if (prefersReducedMotion || !inView || !uncovered) {
+    if (prefersReducedMotion || !inView || !curtainGone) {
       video.pause();
     } else {
       void play();
     }
-  }, [prefersReducedMotion, inView, uncovered, videoFailed, play]);
+  }, [prefersReducedMotion, inView, curtainGone, videoFailed, play]);
 
   // Keyboard users tabbing to the still-hidden link: jump to where it is shown.
   const revealForFocus = () => {
