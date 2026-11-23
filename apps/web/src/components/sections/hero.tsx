@@ -135,6 +135,7 @@ function useRise(progress: MotionValue<number>, motionOn: MotionValue<number>, s
 export function Hero() {
   const sectionRef = useRef<HTMLElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
+  const curtainRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const prefersReducedMotion = useReducedMotion();
   // The server always renders the full-motion layout; switch to the reduced layout only
@@ -146,6 +147,53 @@ export function Hero() {
     () => window.matchMedia(SMALL_SCREEN).matches,
     () => false,
   );
+  const supportsNativeScrollTimeline = useSyncExternalStore(
+    subscribeNothing,
+    () =>
+      CSS.supports("animation-timeline: scroll(root block)") &&
+      CSS.supports("animation-range: 0% 100%"),
+    () => false,
+  );
+  const nativeMobileScroll = hydrated && smallScreen && supportsNativeScrollTimeline;
+  const [nativeScrollRanges, setNativeScrollRanges] = useState<React.CSSProperties>({});
+
+  useEffect(() => {
+    if (!nativeMobileScroll) return;
+    const section = sectionRef.current;
+    const stage = stageRef.current;
+    if (!section || !stage) return;
+
+    const measure = () => {
+      const maxScroll = Math.max(
+        document.documentElement.scrollHeight - document.documentElement.clientHeight,
+        1,
+      );
+      const top = section.getBoundingClientRect().top + window.scrollY;
+      const travel = Math.max(section.offsetHeight - stage.offsetHeight, 1);
+      const range = (progress: number) => `${((top + travel * progress) / maxScroll) * 100}%`;
+      setNativeScrollRanges({
+        "--hero-lift-start": range(0),
+        "--hero-lift-end": range(LIFT_END),
+        "--hero-line-1-start": range(REVEAL_AT[0]),
+        "--hero-line-1-end": range(REVEAL_AT[0] + REVEAL_SPAN),
+        "--hero-line-2-start": range(REVEAL_AT[1]),
+        "--hero-line-2-end": range(REVEAL_AT[1] + REVEAL_SPAN),
+        "--hero-link-start": range(REVEAL_AT[2]),
+        "--hero-link-end": range(REVEAL_AT[2] + REVEAL_SPAN),
+      } as React.CSSProperties);
+    };
+
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(section);
+    observer.observe(stage);
+    observer.observe(document.documentElement);
+    window.addEventListener("resize", measure, { passive: true });
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [nativeMobileScroll]);
 
   const [videoVisible, setVideoVisible] = useState(false);
   const [videoFailed, setVideoFailed] = useState(false);
@@ -199,6 +247,7 @@ export function Hero() {
 
   /** 0 → 1 over the hero's scroll. Every source is read so all stay subscribed. */
   const progress = useTransform(() => {
+    if (nativeMobileScroll) return 0;
     const pinned = clamp01((scrollY.get() - pinTop.get()) / pinTravel.get());
     const page = scrollYProgress.get();
     return mobileOn.get() ? pinned : page;
@@ -220,6 +269,7 @@ export function Hero() {
     return mobileOn.get() ? 1 : zoom;
   });
   useMotionValueEvent(lift, "change", (value) => {
+    if (nativeMobileScroll) return;
     const gone = value >= 0.999;
     if (gone === curtainWasGone.current) return;
     curtainWasGone.current = gone;
@@ -228,6 +278,25 @@ export function Hero() {
     // here so the next reveal waits for a fresh decoded frame before fading in.
     if (!gone && smallScreen) setVideoVisible(false);
   });
+
+  // On supported phones, the curtain position is driven by the browser's scroll
+  // timeline. Observe its actual intersection with the sticky stage for video state.
+  useEffect(() => {
+    if (!nativeMobileScroll) return;
+    const stage = stageRef.current;
+    const curtain = curtainRef.current;
+    if (!stage || !curtain) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        const gone = entry.intersectionRatio === 0;
+        setCurtainGone(gone);
+        if (!gone) setVideoVisible(false);
+      },
+      { root: stage, threshold: 0 },
+    );
+    observer.observe(curtain);
+    return () => observer.disconnect();
+  }, [nativeMobileScroll]);
   const hintOpacity = useTransform(() => 1 - clamp01(progress.get() / 0.1));
 
   const line1 = useRise(progress, motionOn, REVEAL_AT[0]);
@@ -307,6 +376,8 @@ export function Hero() {
       ref={sectionRef}
       id="top"
       aria-label="Introduction"
+      data-native-scroll={nativeMobileScroll ? "true" : undefined}
+      style={nativeMobileScroll ? nativeScrollRanges : undefined}
       className={cn(
         // Small screens clip (not hide, which would break the sticky stage) the
         // backdrop's 100lvh overhang so it never paints over the next section.
@@ -368,20 +439,24 @@ export function Hero() {
         <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center px-4 text-center text-warm-white sm:px-8">
           <h1 className="font-display text-[clamp(2.375rem,1.55rem+3.6vw,5.5rem)] leading-[1.04] font-semibold tracking-[-0.03em] [text-shadow:0_2px_24px_rgba(0,35,44,0.35)]">
             <span className="sr-only">{hero.headline.join(" ")}</span>
-            <motion.span aria-hidden="true" className="block whitespace-nowrap will-change-transform" style={line1.style}>
+            <motion.span
+              aria-hidden="true"
+              className="hero-mobile-reveal-1 block whitespace-nowrap will-change-transform"
+              style={nativeMobileScroll ? undefined : line1.style}
+            >
               {hero.headline[0]}
             </motion.span>
             <motion.span
               aria-hidden="true"
-              className="block whitespace-nowrap text-warm-white/70 will-change-transform"
-              style={line2.style}
+              className="hero-mobile-reveal-2 block whitespace-nowrap text-warm-white/70 will-change-transform"
+              style={nativeMobileScroll ? undefined : line2.style}
             >
               {hero.headline[1]}
             </motion.span>
           </h1>
           <motion.div
-            className="mt-6 will-change-transform sm:mt-8"
-            style={{ ...link.style, pointerEvents: linkPointer }}
+            className="hero-mobile-reveal-link mt-6 will-change-transform sm:mt-8"
+            style={nativeMobileScroll ? undefined : { ...link.style, pointerEvents: linkPointer }}
             onFocusCapture={revealForFocus}
           >
             <a
@@ -401,8 +476,10 @@ export function Hero() {
 
         {/* Curtain: the Ararat scene, lifting away with scroll */}
         <motion.div
+          ref={curtainRef}
           className="absolute inset-0 z-10 bg-ocean-950 shadow-[0_40px_80px_-20px_rgba(0,0,0,0.65)] will-change-transform"
-          style={{ y: curtainY, visibility: curtainVisibility }}
+          data-hero-curtain=""
+          style={nativeMobileScroll ? undefined : { y: curtainY, visibility: curtainVisibility }}
           aria-hidden={reduce || undefined}
         >
           <ParallaxScene

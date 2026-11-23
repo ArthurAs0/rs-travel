@@ -167,6 +167,103 @@ html {
   }
 }
 
+/* Keep mobile scroll-linked movement on the browser's scroll/compositor timeline. */
+@supports (animation-timeline: scroll(root block)) and (animation-range: 0% 100%) {
+  @media (max-width: 1023px) {
+    [data-native-scroll="true"] [data-hero-curtain] {
+      animation-name: hero-curtain-lift;
+      animation-duration: auto;
+      animation-timing-function: linear;
+      animation-fill-mode: both;
+      animation-timeline: scroll(root block);
+      animation-range: var(--hero-lift-start) var(--hero-lift-end);
+    }
+
+    [data-native-scroll="true"] .hero-mobile-reveal-1,
+    [data-native-scroll="true"] .hero-mobile-reveal-2,
+    [data-native-scroll="true"] .hero-mobile-reveal-link {
+      animation-name: hero-mobile-copy-reveal;
+      animation-duration: auto;
+      animation-timing-function: linear;
+      animation-fill-mode: both;
+      animation-timeline: scroll(root block);
+    }
+
+    [data-native-scroll="true"] .hero-mobile-reveal-1 {
+      animation-range: var(--hero-line-1-start) var(--hero-line-1-end);
+    }
+
+    [data-native-scroll="true"] .hero-mobile-reveal-2 {
+      animation-range: var(--hero-line-2-start) var(--hero-line-2-end);
+    }
+
+    [data-native-scroll="true"] .hero-mobile-reveal-link {
+      animation-name: hero-mobile-link-reveal;
+      animation-range: var(--hero-link-start) var(--hero-link-end);
+    }
+
+    @keyframes hero-curtain-lift {
+      0% {
+        transform: translateY(0%);
+        visibility: visible;
+      }
+      99.99% {
+        transform: translateY(-99.99%);
+        visibility: visible;
+      }
+      100% {
+        transform: translateY(-100%);
+        visibility: hidden;
+      }
+    }
+
+    @keyframes hero-mobile-copy-reveal {
+      0% {
+        opacity: 0;
+        transform: translateY(32px);
+        visibility: hidden;
+      }
+      0.01% {
+        visibility: visible;
+      }
+      100% {
+        opacity: 1;
+        transform: translateY(0);
+        visibility: visible;
+      }
+    }
+
+    @keyframes hero-mobile-link-reveal {
+      0% {
+        opacity: 0;
+        transform: translateY(32px);
+        visibility: hidden;
+        pointer-events: none;
+      }
+      0.01% {
+        visibility: visible;
+      }
+      50% {
+        pointer-events: auto;
+      }
+      100% {
+        opacity: 1;
+        transform: translateY(0);
+        visibility: visible;
+        pointer-events: auto;
+      }
+    }
+  }
+}
+
+@media (max-width: 1023px) and (prefers-reduced-motion: reduce) {
+  [data-native-scroll="true"] [data-hero-curtain] {
+    animation: none;
+    transform: translateY(-100%);
+    visibility: hidden;
+  }
+}
+
 ::selection {
   background: var(--color-sun-soft);
   color: var(--color-ocean-900);
