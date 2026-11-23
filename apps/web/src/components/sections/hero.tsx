@@ -208,6 +208,7 @@ export function Hero() {
    */
   const [curtainGone, setCurtainGone] = useState(false);
   const curtainWasGone = useRef(false);
+  const nativeCurtainWasGone = useRef(false);
   const cursor = useCursorDrift(!reduce);
 
   const { scrollYProgress } = useScroll({
@@ -279,23 +280,39 @@ export function Hero() {
     if (!gone && smallScreen) setVideoVisible(false);
   });
 
-  // On supported phones, the curtain position is driven by the browser's scroll
-  // timeline. Observe its actual intersection with the sticky stage for video state.
+  // On supported phones, use the same measured scroll threshold as the CSS timeline
+  // to start/pause the video. IntersectionObserver can miss a transformed sticky layer.
   useEffect(() => {
     if (!nativeMobileScroll) return;
+    const section = sectionRef.current;
     const stage = stageRef.current;
-    const curtain = curtainRef.current;
-    if (!stage || !curtain) return;
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        const gone = entry.intersectionRatio === 0;
-        setCurtainGone(gone);
-        if (!gone) setVideoVisible(false);
-      },
-      { root: stage, threshold: 0 },
-    );
-    observer.observe(curtain);
-    return () => observer.disconnect();
+    if (!section || !stage) return;
+    let top = 0;
+    let travel = 1;
+    const measure = () => {
+      top = section.getBoundingClientRect().top + window.scrollY;
+      travel = Math.max(section.offsetHeight - stage.offsetHeight, 1);
+      update();
+    };
+    const update = () => {
+      const progress = clamp01((window.scrollY - top) / travel);
+      const gone = progress >= LIFT_END * 0.999;
+      if (gone === nativeCurtainWasGone.current) return;
+      nativeCurtainWasGone.current = gone;
+      setCurtainGone(gone);
+      if (!gone) setVideoVisible(false);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(section);
+    observer.observe(stage);
+    window.addEventListener("scroll", update, { passive: true });
+    window.addEventListener("resize", measure, { passive: true });
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("scroll", update);
+      window.removeEventListener("resize", measure);
+    };
   }, [nativeMobileScroll]);
   const hintOpacity = useTransform(() => 1 - clamp01(progress.get() / 0.1));
 
